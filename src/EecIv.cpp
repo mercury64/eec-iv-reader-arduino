@@ -106,7 +106,7 @@ void EecIv::mainLoop() {
         } else if (mode == KOEO) {
           currentState = REQUEST_KOEO;
         } else if (mode == LIVE_DATA) {
-          currentState = IDLE;
+          currentState = REQUEST_PID_MODE;
         } else {
           currentState = IDLE;
         }
@@ -130,7 +130,6 @@ void EecIv::mainLoop() {
       break;
     case READ_CONT_SELF_TEST_CODES:
       if (cart->hasData) {
-        Serial.println("Has Data");
         uint8_t data[2];
         cart->getData(data);
         onFaultCodeRead(data);
@@ -168,7 +167,7 @@ void EecIv::mainLoop() {
           cart->frameDone = false;
         }
 
-        if (cart->frameDone || koeoCounter >= 12) {
+        if (cart->frameDone) {
           onFaultCodeFinished();
           currentState = IDLE;
           cart->enableDiagnosticParameterSending = false;
@@ -178,6 +177,31 @@ void EecIv::mainLoop() {
         cart->getData(data);
         onFaultCodeRead(data);
       }
+      break;
+    case REQUEST_PID_MODE:
+    {
+      const uint8_t pidMessage[8] = {
+        0x01, 0xb0, 0xff, 0x5f, 0x41, 0x96, 0x00, 0xa0 
+      };
+      cart->setDiagnosticParameter(pidMessage);
+      currentState = WAIT_PID_MODE;
+      break;
+    }
+    case WAIT_PID_MODE:
+      if (cart->nextDiagnosticMode == 0x41) {
+        currentState = TRANSMIT_PID_MAP;
+      }
+      break;
+    case TRANSMIT_PID_MAP:
+    {
+      const uint8_t pidMessage[8] = {
+        0x01, 0xb0, 0xff, 0x5f, 0x21, 0xF6, 0x00, 0xa0 
+      };
+      cart->setDiagnosticParameter(pidMessage);
+      currentState = WAIT_PID_MAP;
+      break;
+    }
+    case WAIT_PID_MAP:
       break;
   }
 

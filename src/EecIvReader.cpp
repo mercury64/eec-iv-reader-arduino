@@ -39,6 +39,9 @@ OneButton button3(BTN_3, false, false);
 #define NUM_ROW 8
 #define HEADING_SELECT "Select Mode"
 
+// enable voltage monitor
+//#define VOLTAGE_MONITOR
+
 U8X8_SH1106_128X64_NONAME_HW_I2C u8x8(/* reset=*/ U8X8_PIN_NONE);
 
 void serialPrint(const char message[]) {
@@ -66,12 +69,22 @@ void drawMenuScreen(const char selectSign, const char upSign, const char downSig
 EecIv eecIv (DI, RO, RE);
 VoltageReader voltageReader(VOL);
 
+#ifdef VOLTAGE_MONITOR
 #define NUM_MAIN_MENU_MODES 3
 enum MAIN_MENU_MODE {
   FAULT_CODE,
   KOEO,
   VOLTAGE
 };
+#else
+#define NUM_MAIN_MENU_MODES 2
+enum MAIN_MENU_MODE {
+  FAULT_CODE,
+  KOEO
+};
+#endif
+
+
 MAIN_MENU_MODE mainMenuMode = FAULT_CODE;
 
 enum SCREEN_MODE {
@@ -90,7 +103,6 @@ char koeo_codes[12][4]; // all koeo codes, maximum 12 with each lengh 4
 uint8_t koeo_i = 0; // index for reading koeo
 uint8_t koeo_code = 0; // index for showing koeo
 char koeo_i_max = -1; // maximum index of koeos, -1 if none found
-bool koeo_end_found = false; // koeo end message found ("000")
 
 void setup() {
   Serial.begin(19200);
@@ -171,7 +183,6 @@ void loop() {
   button2.tick();
   button3.tick();
 
-  // TODO only running loop
   eecIv.mainLoop();
   if (screenMode == SHOW_VOLTAGE) {
     voltageReader.loop();
@@ -242,13 +253,6 @@ void showMainMenu() {
   drawMenuScreen(SELECT_SIGN, UP_SIGN, DOWN_SIGN, HEADING_SELECT, "Read Fault ", "Code Memory", "");
 }
 
-void switchFaultCode(bool down) {
-  koeo_code = down ? (koeo_code+koeo_i_max)%(koeo_i_max+1) : (koeo_code+1)%(koeo_i_max+1);
-  char code_buf[16];
-  sprintf(code_buf, "[%0d] %s", koeo_code+1, koeo_codes[koeo_code]);
-  drawMenuScreen(BACK_SIGN, UP_SIGN, DOWN_SIGN, "Fault Code", code_buf, "", "");
-}
-
 void switchMainMenuMode(bool down) {
   mainMenuMode = down ? (MAIN_MENU_MODE)((mainMenuMode+1)%NUM_MAIN_MENU_MODES) : (MAIN_MENU_MODE)((mainMenuMode+NUM_MAIN_MENU_MODES-1)%NUM_MAIN_MENU_MODES);
   switch (mainMenuMode) {
@@ -258,9 +262,16 @@ void switchMainMenuMode(bool down) {
     case KOEO:
       drawMenuScreen(SELECT_SIGN, UP_SIGN, DOWN_SIGN, HEADING_SELECT, "Run System ", "Test", "");
       break;
+#ifdef VOLTAGE_MONITOR
     case VOLTAGE:
       drawMenuScreen(SELECT_SIGN, UP_SIGN, DOWN_SIGN, HEADING_SELECT, "Measure", "Voltage", "");
       break;
+#endif
+#if false
+    case LIVE_DATA:
+      drawMenuScreen(SELECT_SIGN, UP_SIGN, DOWN_SIGN, HEADING_SELECT, "Live Data", "", "");
+      break;
+#endif
   }
 }
 
@@ -275,15 +286,23 @@ void selectMode() {
     case KOEO:
       eecIv.setMode(EecIv::OperationMode::KOEO);
       eecIv.restartReading();
-      koeo_i_max = -1;
-      koeo_end_found = false;
       screenMode = RUNNING_KOEO;
       drawWaitingScreen();
       break;
+#if false
+    case LIVE_DATA:
+      eecIv.setMode(EecIv::OperationMode::LIVE_DATA);
+      eecIv.restartReading();
+      screenMode = READING_FAULT_CODE;
+      drawWaitingScreen();
+      break;
+#endif
+#ifdef VOLTAGE_MONITOR
     case VOLTAGE:
       screenMode = SHOW_VOLTAGE;  
       u8x8.clear();
       break;
+#endif
   }
 }
 
@@ -292,28 +311,29 @@ void onStartMessageTimeout() {
   drawMenuScreen(BACK_SIGN, NO_SIGN, NO_SIGN, "Timeout Error", "Is the igni-", "tion on?", "");
 }
 
-void onFaultCodeRead(const uint8_t data[]) {
-  sprintf(koeo_codes[koeo_i], "%01X%02X", data[1] & 0xF, data[0]);
-  if (!koeo_end_found && !strcmp(koeo_codes[koeo_i], "000")) {
-    koeo_i_max = koeo_i-1;
-    koeo_end_found = true;
-  }
-  koeo_i++;
+void switchFaultCode(bool down) {
+  koeo_code = down ? (koeo_code+koeo_i_max)%(koeo_i_max+1) : (koeo_code+1)%(koeo_i_max+1);
+  char code_buf[16];
+  sprintf(code_buf, "[%0d] %s", koeo_code+1, koeo_codes[koeo_code]);
+  drawMenuScreen(BACK_SIGN, UP_SIGN, DOWN_SIGN, "Fault Code", code_buf, "", "");
 }
 
+void onFaultCodeRead(const uint8_t data[]) {
+  sprintf(koeo_codes[koeo_i], "%01X%02X", data[1] & 0xF, data[0]);
+  koeo_i++;
+}
 
 void onFaultCodeFinished() {
   char code_buf[16];
 
-  // no end message found, all 12 codes are set
-  if (!koeo_end_found) {
-    koeo_i_max = koeo_i-1;
-  }
+  koeo_i_max = koeo_i-1;
+  
+  sprintf(code_buf, "\nFault codes found: %d", koeo_i);
+  Serial.println(code_buf);
 
   koeo_i = 0;
   koeo_code = 0;
 
-  // if first message is end message
   // no fault codes set
   if (koeo_i_max == -1) {
     drawMenuScreen(BACK_SIGN, NO_SIGN, NO_SIGN, "Fault Code", "None found", "", "");
@@ -324,13 +344,4 @@ void onFaultCodeFinished() {
   screenMode = RESULT_KOEO;
   sprintf(code_buf, "[%0d] %s", koeo_code+1, koeo_codes[koeo_code]);
   drawMenuScreen(BACK_SIGN, UP_SIGN, DOWN_SIGN, "Fault Code", code_buf, "", "");
-}
-
-void onFaultCodeFinished(const char message[]) {
-  screenMode = RESULT_FAULT_CODE;
-  if (strcmp(message, "111")) {
-    drawMenuScreen(BACK_SIGN, NO_SIGN, NO_SIGN, "Fault Code", message, "", "");
-  } else {
-    drawMenuScreen(BACK_SIGN, NO_SIGN, NO_SIGN, "Fault Code", message, "(No Faults)", "");
-  }
 }

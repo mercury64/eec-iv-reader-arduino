@@ -1,7 +1,7 @@
 #include "Cart.h"
 
-const uint8_t Cart::startMessage[12] = {
-  0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+const uint8_t Cart::startMessage[11] = {
+  0x00, 0x00, 0x00, 0x00, 0x00,
   0x01, 0x04, 0x00, 0x00, 0x00, 0x05
 };
 
@@ -113,6 +113,7 @@ void Cart::loop() {
                 // do nothing as we wait for next sync;
                 break;
             case ID_SLOT:
+
                 if (frameNumber > 15) {
                     frameNumber = 0;
                     isSynced = true;
@@ -153,10 +154,8 @@ void Cart::loop() {
                 mode = DATA_SLOT;
                 break;
             case DATA_SLOT:
-                // only read one word and wait for next frame
                 memcpy(data, wordBuffer, 2);
                 hasData = true;
-                mode = WAIT_SYNC;
                 break;
         }
 
